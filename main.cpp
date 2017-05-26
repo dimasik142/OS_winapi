@@ -12,6 +12,8 @@ BOOL Line(HDC, int, int, int, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 HANDLE handeForChangeColor, handeForAddNewAuto, handeForCheckThreeAuto;
 
+UINT userMessage  = RegisterWindowMessage(L"Безполезне повідомлення");
+
 CRITICAL_SECTION critic_section;
 
 DWORD WINAPI addAutoToMap(LPVOID);
@@ -82,7 +84,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 
 	int delta;
 
-
+	if (messg == userMessage) {
+		MessageBox(NULL, (LPCTSTR)L"Надзвичайно важливе повідомлення", L"Повідомлення", MB_ICONASTERISK | MB_OK);
+	}
 	switch (messg) {
 
 
@@ -208,6 +212,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 			break;
 		case VK_F6:
 			onThreadStatus = true;
+			break;
+		case VK_F7:
+			SendMessage(hWnd, userMessage, 0, 0); 
 			break;
 		default:
 			break;
