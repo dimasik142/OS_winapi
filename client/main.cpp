@@ -2,6 +2,7 @@
 #include<string.h>
 #include <ctime>
 #include <fstream>
+#include <tchar.h>
 
 
 #define BLOCK_HEIGHT 100
@@ -12,13 +13,26 @@ BOOL Line(HDC, int, int, int, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 HANDLE handeForChangeColor, handeForAddNewAuto, handeForCheckThreeAuto;
 
-UINT userMessage  = RegisterWindowMessage(L"Безполезне повідомлення");
+#define BUFSIZE 512
+HANDLE hPipe;
+TCHAR lpClientMessage[BUFSIZE];
+BOOL fSuccess = FALSE;
+DWORD cbReadBytes, cbToWriteBytes, cbWrittenBytes, dwMode;
+HANDLE hHeap = GetProcessHeap();
+TCHAR* pchMessage = (TCHAR*)HeapAlloc(hHeap, 0, BUFSIZE * sizeof(TCHAR));
+TCHAR* pchReply = (TCHAR*)HeapAlloc(hHeap, 0, BUFSIZE * sizeof(TCHAR));
+TCHAR userName[BUFSIZE];
+
+UINT userMessage = RegisterWindowMessage(L"Безполезне повідомлення");
 
 CRITICAL_SECTION critic_section;
 
 DWORD WINAPI addAutoToMap(LPVOID);
 DWORD WINAPI changeAutosAndMapColor(LPVOID);
 DWORD WINAPI checkToTheThreeAutos(LPVOID);
+
+LPTSTR lpszPipename = TEXT("\\\\.\\pipe\\game");
+
 
 int autosColor[3] = { 111,111,111 };
 int positionAutos[5][2] = { { 1000,3 },{ 1000,3 },{ 1000,3 },{ 1000,3 },{ 1000,3 } };
@@ -30,9 +44,11 @@ const int priorityProcessArray[3] = {
 	3    // chackAutos
 };
 
+unsigned int start_time, end_time;
 char szProgName[] = "Егра";
 int timeStatus = 0, playerPosition = 1, saveAuto = 100, saveAutoTime = 0, AS_mode = 1;
 bool onThreadStatus = false;
+
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpszCmdLine, int nCmdShow)
 {
@@ -73,7 +89,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpszCmdLi
 	return(lpMsg.wParam);
 }
 
-
 LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 
 	HDC hdc;
@@ -94,6 +109,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 		if (AS_mode == 0) {
 			InitializeCriticalSection(&critic_section);
 		}
+		
+		start_time = clock();
 		SetTimer(hWnd, 1, 50, NULL);
 		handeForAddNewAuto = CreateThread(NULL, 0, addAutoToMap, NULL, 0, NULL);
 		SetForegroundWindow(hWnd);
@@ -108,7 +125,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 		for (int item = 0; item < 5; item++) {
 			if (positionAutos[item][0] + BLOCK_HEIGHT > 550 && positionAutos[item][0] < 650 && positionAutos[item][1] == playerPosition) {
 				KillTimer(hWnd, 1);
-				MessageBox(NULL, (LPCTSTR)L"канец", L"канец", MB_ICONASTERISK | MB_OK);
+				end_time = clock();
+
+				for (;;) {
+					hPipe = CreateFile(lpszPipename, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+					if (hPipe != INVALID_HANDLE_VALUE) {
+						break;
+					}
+				}
+				dwMode = PIPE_READMODE_MESSAGE;
+				fSuccess = SetNamedPipeHandleState(hPipe, &dwMode, NULL, NULL);
+
+				char dest[100], endTExt[6] = "END ";
+				itoa(end_time - start_time, dest, 10);
+				strcat(endTExt, dest);
+				TCHAR buf[10] = { 0 };
+
+				_stprintf(buf, TEXT("%d"), (end_time - start_time)/1000);
+
+				cbToWriteBytes = (lstrlen(buf) + 1) * sizeof(TCHAR);
+				fSuccess = WriteFile(hPipe, buf, cbToWriteBytes, &cbWrittenBytes, NULL);
+
+				do {
+					fSuccess = ReadFile(hPipe, pchReply, BUFSIZE * sizeof(TCHAR), &cbReadBytes, NULL);
+					if (!fSuccess && GetLastError() != ERROR_MORE_DATA) {
+						break;
+					}
+				} while (!fSuccess);
+				TCHAR bufasdasds[BUFSIZE] = L"Твій результат = ";
+				_stprintf(bufasdasds, TEXT("%d"), (end_time - start_time) / 1000);
+
+				MessageBox(NULL, pchReply, bufasdasds, MB_ICONASTERISK | MB_OK);
+				CloseHandle(hPipe);
+				HeapFree(hHeap, 0, pchMessage);
+				HeapFree(hHeap, 0, pchReply);
+
 				PostQuitMessage(0);
 
 			}
@@ -188,7 +239,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 		EndPaint(hWnd, &ps);
 		break;
 
-
 	case WM_KEYDOWN:
 		handeForChangeColor = CreateThread(NULL, 0, changeAutosAndMapColor, NULL, 0, NULL);
 		SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
@@ -196,33 +246,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 		CloseHandle(handeForChangeColor);
 
 		switch (wParam) {
-		case VK_LEFT:
-			if (playerPosition != 0)
-				playerPosition -= 1;
-			InvalidateRect(hWnd, NULL, TRUE);
-			break;
-		case VK_RIGHT:
-			if (playerPosition != 2)
-				playerPosition += 1;
-			InvalidateRect(hWnd, NULL, TRUE);
-			break;
-		case VK_F5:
-			SuspendThread(handeForAddNewAuto);
-			onThreadStatus = false;
-			break;
-		case VK_F6:
-			onThreadStatus = true;
-			break;
-		case VK_F7:
-			SendMessage(hWnd, userMessage, 0, 0); 
-			break;
-		default:
-			break;
+			case VK_LEFT:
+				if (playerPosition != 0)
+					playerPosition -= 1;
+				InvalidateRect(hWnd, NULL, TRUE);
+				break;
+			case VK_RIGHT:
+				if (playerPosition != 2)
+					playerPosition += 1;
+				InvalidateRect(hWnd, NULL, TRUE);
+				break;
+			case VK_F5:
+				SuspendThread(handeForAddNewAuto);
+				onThreadStatus = false;
+				break;
+			case VK_F6:
+				ResumeThread(handeForAddNewAuto);
+				onThreadStatus = true;
+				break;
+			case VK_F7:
+				SendMessage(hWnd, userMessage, 0, 0);
+				break;
+			default:
+				break;
 		}
 		break;
 
 
 	case WM_DESTROY:
+		end_time = clock();
+
 		PostQuitMessage(0);
 		break;
 
@@ -233,6 +286,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam) {
 	ResumeThread(handeForAddNewAuto);
 	return 0;
 }
+
 
 BOOL Line(HDC hdc, int x1, int y1, int x2, int y2)
 {
